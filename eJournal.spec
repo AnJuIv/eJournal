@@ -2,10 +2,10 @@
 
 
 a = Analysis(
-    ['eJournal.py'],
+    ['C:\\Users\\jukan\\OneDrive\\Рабочий стол\\курсовая\\eJournal.py'],
     pathex=[],
     binaries=[],
-    datas=[('elzhur.ui', '.')],
+    datas=[('C:\\Users\\jukan\\OneDrive\\Рабочий стол\\курсовая\\elzhur.ui', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

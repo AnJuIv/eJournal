@@ -7,6 +7,17 @@ from PyQt6 import uic
 from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QStackedWidget, QMessageBox, QTableWidgetItem
 
 
+def log_operation(operation, user_id):
+    # Функция для записи логов в базу данных.
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO Logs (Operation, ID_User) VALUES (?, ?)",
+        (operation, user_id))
+    conn.commit()
+    conn.close()
+
+
 def path_to_res(relative_path):
     if getattr(sys, 'frozen', False):
         base_path = sys._MEIPASS
@@ -40,6 +51,52 @@ class ElZhur(QMainWindow):
         self.export_schedule.clicked.connect(self.Export_schedule)
         self.out.clicked.connect(self.Logout)
         self.out_admin.clicked.connect(self.Logout)
+        self.to_add_user.clicked.connect(self.To_Add_User)
+        self.back_2.clicked.connect(self.To_Schedule)
+        self.add_user.clicked.connect(self.Add_User)
+
+    def Add_User(self):
+        name = self.name_2.text()
+        surname = self.surname_2.text()
+        patronymic = self.patronymic_2.text()
+        email = self.email_2.text()
+        login = self.login_2.text()
+        password = self.password_2.text()
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        try:
+            if (len(email.split("@")) != 2 or email.split(".")[-1] not in ['ru', 'com', 'net']):
+                QMessageBox.warning(self, "Некорректный email",
+                                    f"Неправильно задан email")
+            else:
+                cursor.execute("SELECT id FROM Groups WHERE group_name=?",
+                               (self.groups_to_add.currentText(),))
+                group = cursor.fetchone()
+                print(group[0])
+                cursor.execute("INSERT INTO Student(login, password, name, surname, patronymic, email, group_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                               (login, password, name, surname, patronymic, email, group[0]))
+                conn.commit()
+                QMessageBox.information(
+                    self, "Успех", "Данные успешно сохранены.")
+                self.name_2.setText('')
+                self.surname_2.setText('')
+                self.patronymic_2.setText('')
+                self.email_2.setText('')
+                self.login_2.setText('')
+                self.password_2.setText('')
+        except Exception as e:
+            QMessageBox.warning(self, "Ошибка сохранения",
+                                f"Не удалось сохранить данные: {str(e)}")
+
+    def To_Add_User(self):
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT group_name FROM Groups")
+        group_names = cursor.fetchall()
+        for i in group_names:
+            self.groups_to_add.addItem(*i)
+        conn.close()
+        self.stackedWidget.setCurrentIndex(6)
 
     def Logout(self):
         self.stackedWidget.setCurrentIndex(0)
@@ -85,6 +142,7 @@ class ElZhur(QMainWindow):
         QMessageBox.information(
             self, "Экспорт", "Расписание успешно экспортировано в schedule_export.xlsx")
         conn.close()
+        log_operation("Экспорт расписания", self.user[0])
 
     def Export_report(self):
         doc = Document()
@@ -94,6 +152,7 @@ class ElZhur(QMainWindow):
             os.environ["USERPROFILE"], "Документы/report.docx"))
         QMessageBox.information(
             self, "Экспорт", "Отчет успешно экспортирован в report.docx")
+        log_operation("Экспорт отчета", self.user[0])
 
     def Create_Report(self):
         conn = sqlite3.connect(db_path)
@@ -122,6 +181,7 @@ class ElZhur(QMainWindow):
         period = self.period.currentText()
         self.report.setPlainText(self.report.toPlainText(
         ) + f"По предмету {subj} в {period} отведено (в часах): {count * 1.5 * {'Год': 52, 'Месяц': 4,'Неделя':1}[period]}.\n")
+        log_operation("Создание отчета", self.user[0])
         conn.close()
 
     def To_Schedule(self):
@@ -130,7 +190,14 @@ class ElZhur(QMainWindow):
         else:
             self.stackedWidget.setCurrentIndex(3)
 
-    def To_Export(self):
+
+    def Back_Admin(self):
+        self.stackedWidget.setCurrentIndex(4)
+
+    def Back(self):
+        self.stackedWidget.setCurrentIndex(3)
+
+    def Authorization(self)    def To_Export(self):
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         if self.user[7] == 3:
@@ -177,23 +244,16 @@ class ElZhur(QMainWindow):
                                 f"Не удалось обновить данные: {str(e)}")
         finally:
             conn.close()
-
-    def Back_Admin(self):
-        self.stackedWidget.setCurrentIndex(4)
-
-    def Back(self):
-        self.stackedWidget.setCurrentIndex(3)
-
-    def Authorization(self):
+:
         log = self.login.text()
         pas = self.password.text()
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
-
+        #Поиск пользователя в базе данных
         cursor.execute(
             "SELECT * FROM Student WHERE login=? AND password=?", (log, pas))
         user = cursor.fetchone()
-
+        # Успешно найден, авторизация
         if user:
             self.user = user
             group_id = user[7]
@@ -214,6 +274,8 @@ class ElZhur(QMainWindow):
                 self.populate_schedule(group_id)
 
                 self.stackedWidget.setCurrentIndex(3)
+            log_operation("Авторизация", user[0])
+        #ошибка входа
         else:
             QMessageBox.warning(self, "Ошибка входа",
                                 "Неверный логин или пароль.")
@@ -237,54 +299,62 @@ class ElZhur(QMainWindow):
     def populate_schedule(self, group_id):
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
-        cursor.execute("""
-        SELECT S.subject, S.weekday, C.class_number FROM Schedule S
-        JOIN Classes C ON S.class_number = C.class_number
-        WHERE S.group_id = ? ORDER BY S.weekday, C.class_number""", (group_id,))
-        schedule = cursor.fetchall()
-        cursor.execute("SELECT * FROM Classes")
-        cl = cursor.fetchall()
-        classes = {i[0]: str(i[1])+'-'+str(i[2]) for i in cl}
-        schedule_dict = {day: [''] * 6 for day in ['Monday',
-                                                   'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']}
-        for subject, weekday, class_number in schedule:
-            day_index = ['Monday', 'Tuesday', 'Wednesday',
-                         'Thursday', 'Friday', 'Saturday'].index(weekday)
-            schedule_dict[weekday][class_number - 1] = subject
-        if self.user[7] == 3:
-            self.tableWidget_2.clear()
-            self.tableWidget_2.setColumnCount(6)
-            self.tableWidget_2.setRowCount(6)
-            self.tableWidget_2.setHorizontalHeaderLabels(
-                ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'])
+
+        try:
+            # Получение расписания для заданной группы с информацией о преподавателе
+            cursor.execute("""
+                SELECT S.subject, S.weekday, C.class_number, L.surname, L.name
+                FROM Schedule S
+                JOIN Classes C ON S.class_number = C.class_number
+                JOIN Lecturer L ON S.lecturer_id = L.id
+                WHERE S.group_id = ?
+                ORDER BY S.weekday, C.class_number
+            """, (group_id,))
+            schedule = cursor.fetchall()
+
+            # Получение всех классов
+            cursor.execute("SELECT * FROM Classes")
+            classes = {i[0]: str(i[1]) + '-' + str(i[2]) for i in cursor.fetchall()}
+
+            # Инициализация словаря расписания
+            schedule_dict = {day: [''] * 6 for day in ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']}
+
+            # Заполнение расписания
+            for subject, weekday, class_number, lecturer_surname, lecturer_name in schedule:
+                day_index = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].index(weekday)
+                # Форматирование строки с предметом и ФИО преподавателя
+                lecturer_initials = f"{lecturer_surname} {lecturer_name[0]}."  # Фамилия и первая буква имени
+                schedule_dict[weekday][class_number - 1] = f"{subject}\n{lecturer_initials}"
+
+            # Определение таблицы для отображения
+            if self.user[7] == 3:
+                table_widget = self.tableWidget_2
+            else:
+                table_widget = self.tableWidget
+
+            # Настройка таблицы
+            table_widget.clear()
+            table_widget.setColumnCount(6)
+            table_widget.setRowCount(6)
+            table_widget.setHorizontalHeaderLabels(['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'])
+
+            # Заполнение таблицы данными расписания
             for day_index, day in enumerate(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']):
                 for class_index in range(6):
-                    subject = classes[class_index+1] + \
-                        '\n' + schedule_dict[day][class_index]
-                    if subject:
-                        self.tableWidget_2.setItem(
-                            class_index, day_index, QTableWidgetItem(subject))
+                    subject_display = classes.get(class_index + 1, '') + '\n' + schedule_dict[day][class_index]
+                    if subject_display.strip():  # Проверка на пустую строку
+                        table_widget.setItem(class_index, day_index, QTableWidgetItem(subject_display))
+
+            # Настройка размеров столбцов и строк
+            table_widget.resizeColumnsToContents()
+            for row in range(6):
+                table_widget.setRowHeight(row, 50)
+
+        except Exception as e:
+            QMessageBox.warning(self, "Ошибка", f"Не удалось загрузить расписание: {str(e)}")
+
+        finally:
             conn.close()
-            self.tableWidget_2.resizeColumnsToContents()
-            for row in range(7):
-                self.tableWidget_2.setRowHeight(row, 50)
-        else:
-            self.tableWidget.clear()
-            self.tableWidget.setColumnCount(6)
-            self.tableWidget.setRowCount(6)
-            self.tableWidget.setHorizontalHeaderLabels(
-                ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'])
-            for day_index, day in enumerate(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']):
-                for class_index in range(6):
-                    subject = classes[class_index+1] + \
-                        '\n' + schedule_dict[day][class_index]
-                    if subject:
-                        self.tableWidget.setItem(
-                            class_index, day_index, QTableWidgetItem(subject))
-                conn.close()
-            self.tableWidget.resizeColumnsToContents()
-            for row in range(7):
-                self.tableWidget.setRowHeight(row, 50)
 
     def Save_admin(self):
         name = self.name_admin.text()
@@ -296,6 +366,7 @@ class ElZhur(QMainWindow):
         cursor = conn.cursor()
 
         try:
+            #Обновление данных
             cursor.execute("UPDATE Student SET name=?, surname=?, patronymic=?, email=? WHERE id=?",
                            (name, surname, patronymic, email, admin_id))
             conn.commit()
@@ -313,10 +384,10 @@ class ElZhur(QMainWindow):
 
 app = QApplication(sys.argv)
 window = ElZhur()
+#Название окна
 window.setWindowTitle("Электронный журнал")
 try:
     window.show()
-except:
-    pass  # сделать обработчик
-
+except Exception as e:  # Обрабатываем исключения при запуске
+    QMessageBox.warning(window, "Ошибка", f"Не удалось запустить приложение: {str(e)}")
 app.exec()
